@@ -2,6 +2,8 @@
 
 > 最后更新：2026-05-22
 > 当前进度：1764 条去重数据（目标 2000 条，还需 236 条）
+> 脚本版本：v2.0（已修复详情页跳转、页面错误恢复、健康监控）
+> 独立目录：`C:\Users\Administrator\Desktop\daliy\jimeng-scraper\`
 
 ## 项目概述
 
@@ -10,16 +12,20 @@
 ## 文件结构
 
 ```
-C:\Users\Administrator\Desktop\daliy\scripts\
-├── jimeng-scraper.js          # 爬取脚本（核心）
-├── jimeng-scraper-guide.md    # 本指南文件
-├── jimeng-all.json            # 合并后的去重数据（当前 458 条）
-├── batch1.json                # Agent 1 爬取结果（累计 79 条）
-├── batch2.json                # Agent 2 爬取结果（累计 56 条）
-├── batch3.json                # Agent 3 爬取结果（累计 213 条）
-├── batch4.json                # Agent 4 爬取结果（累计 254 条）
-├── package.json               # Node.js 依赖
-└── node_modules/              # 依赖目录（已安装 playwright）
+jimeng-scraper/                ← 独立目录（可直接复制使用）
+├── RUNBOOK.md                 ← AI运行手册（给AI看的）
+├── README.md                  ← 使用说明（给人看的）
+├── jimeng-scraper.js          ← 核心脚本 v2.0
+├── jimeng-scraper-guide.md    ← 本指南（详细文档）
+├── package.json               ← 依赖
+└── package-lock.json
+
+scripts/                       ← 原始目录（保留兼容）
+├── jimeng-scraper.js          ← 同步副本
+├── jimeng-scraper-guide.md    ← 同步副本
+├── jimeng-all.json            ← 去重数据（1764条）
+├── batch1-4.json              ← 各端口爬取结果
+└── package.json
 ```
 
 ## 环境要求
@@ -107,22 +113,20 @@ node jimeng-scraper.js --port 9230 --output batch1.json --max 500
 - `--output`：输出 JSON 文件名
 - `--max`：最大爬取条数
 
-**工作流程：**
+**工作流程（v2.0）：**
 1. 连接到指定端口的 Chrome 实例
-2. 导航到即梦首页
+2. 导航到即梦首页（domcontentloaded，不用 networkidle）
 3. 循环：
-   a. 获取当前页面所有图片元素
-   b. 逐个点击图片（force click 绕过遮挡）
-   c. 等待弹窗加载
-   d. 用 JavaScript 从 DOM 提取：
-      - 提示词（找"图片提示词"标签后的文本）
-      - 模型版本（找"图片 X.X"格式）
-      - 比例（找"X:X"格式）
-      - 作者和日期
-   e. 按 Escape 关闭弹窗
-   f. 每条数据即时写入文件（防止中断丢失）
-   g. 随机延迟 2-4 秒（防反爬）
-4. 滚动加载更多图片
+   a. 健康检查（30秒一次，打印进度/速度/错误数）
+   b. 确保在首页（检测详情页自动返回）
+   c. 检测页面错误（连续3次自动刷新）
+   d. 用多选择器查找图片（6个备选，自动切换）
+   e. 逐个点击图片 → **跳转到详情页**（整页跳转，不是弹窗）
+   f. 在详情页提取提示词、模型、比例、作者、日期
+   g. safeGoto 返回首页，等待图片加载
+   h. 每条数据即时追加写入文件（appendFileSync，不读取整个文件）
+   i. 每 50 条暂停 5-10 秒（防反爬）
+4. 滚动加载更多图片（最多50次）
 5. 重复直到达到 max 条数或无新内容
 
 **防反爬措施：**
@@ -140,60 +144,36 @@ node jimeng-scraper.js --port 9230 --output batch1.json --max 500
 
 ### 已知问题
 
-1. **Agent 超时**：Claude 的后台 agent 有超时限制（约 10 分钟），每个 agent 大约能爬 100-200 条就被终止
-2. **Chrome 崩溃**：有时 Chrome 会弹出崩溃提示，可以关掉那个窗口，不影响其他端口
-3. **写入失败**：脚本的追加写入机制偶尔会失败（被 catch 静默忽略），导致部分数据在内存中丢失
+1. **Chrome 崩溃**：有时 Chrome 会弹出崩溃提示，关掉那个窗口，重新启动该端口
+2. **速度限制**：约 5-6 条/分钟/端口，4 端口并行约 20-24 条/分钟
 
-### Bug 修复记录（2026-05-22）
-
-**v2.0 重写修复（全部问题）：**
+### v2.0 修复记录
 
 | 问题 | 修复方案 |
 |------|----------|
-| 详情页循环跳转 | URL 检测 + DOM 双重检测，自动返回首页 |
-| 弹窗检测假阳性 | 5 个备选 DETAIL_SELECTORS，检测 offsetParent/visibility |
-| 文件写入竞争 | 改为 appendFileSync 追加模式，不读取整个文件 |
+| 详情页循环跳转 | 点击后 waitForURL 等待跳转，在详情页提取数据后 safeGoto 返回 |
+| networkidle 超时 | 改用 domcontentloaded + 手动等待图片加载 |
+| 文件写入 O(n²) | 改为 appendFileSync 追加模式 |
 | 选择器脆弱 | 6 个备选 IMAGE_SELECTORS，自动切换 |
-| goto 失败静默 | safeGoto 带 3 次重试，失败后报错 |
+| goto 失败静默 | safeGoto 带 3 次重试，失败后报错退出 |
 | 无限刷新循环 | MAX_REFRESHES=20，超过后退出 |
-| dialog.close() 无效 | closeModal() 用 4 种方式关闭（Escape/点击空白/移除DOM/再Escape）|
+| 弹窗关闭无效 | closeModal() 智能检测，先检查再关闭 |
 | 懒加载 src 为空 | getImgSrc() 同时检查 src/data-src/data-lazySrc |
-| goBack() 导航错误 | 统一用 safeGoto(HOME_URL) |
-| 滚动次数太少 | MAX_SCROLL_COUNT 从 20 提高到 50 |
 | 无进度速度 | 每条打印 条/分钟 速度 |
-| 无优雅退出 | SIGINT handler，安全退出并保存数据 |
-| 无连接错误处理 | Chrome 连接失败时明确报错并退出 |
+| 无优雅退出 | Ctrl+C 安全退出，数据不丢失 |
+| 无连接错误处理 | Chrome 连接失败时明确报错并退出码 1 |
+| 无健康监控 | 每 30 秒打印进度/速度/错误/选择器 |
 
-### 解决方案
+### 运行方式
 
-如果需要爬取更多数据（比如 2000 条），可以：
-
-**方案 A：多轮运行**
-- 每轮启动 4 个 agent，每个爬 200 条
-- 重复多轮直到达到目标
-- 每轮结束后合并数据
-
-**方案 B：直接在终端运行（推荐）**
-- 打开 4 个终端窗口
-- 每个窗口运行一个脚本实例：
+**推荐：4 端口并行（后台 Bash 任务）**
 ```bash
-# 终端 1
-cd /c/Users/Administrator/Desktop/daliy/scripts
-node jimeng-scraper.js --port 9230 --output batch1.json --max 500
-
-# 终端 2
-cd /c/Users/Administrator/Desktop/daliy/scripts
-node jimeng-scraper.js --port 9231 --output batch2.json --max 500
-
-# 终端 3
-cd /c/Users/Administrator/Desktop/daliy/scripts
-node jimeng-scraper.js --port 9232 --output batch3.json --max 500
-
-# 终端 4
-cd /c/Users/Administrator/Desktop/daliy/scripts
-node jimeng-scraper.js --port 9233 --output batch4.json --max 500
+cd /c/Users/Administrator/Desktop/daliy/jimeng-scraper
+node jimeng-scraper.js --port 9230 --output batch1.json --max 500 &
+node jimeng-scraper.js --port 9231 --output batch2.json --max 500 &
+node jimeng-scraper.js --port 9232 --output batch3.json --max 500 &
+node jimeng-scraper.js --port 9233 --output batch4.json --max 500 &
 ```
-- 这样不受 agent 超时限制
 
 ## 数据格式
 
@@ -262,12 +242,14 @@ node jimeng-scraper.js --port 9233 --output batch4.json --max 500
 
 ## 下次继续时的操作
 
-1. **读取本文件**：让 Claude 读取 `jimeng-scraper-guide.md`
-2. **检查当前数据**：查看 `jimeng-all.json` 有多少条
-3. **启动 Chrome**：运行上面的 Chrome 启动命令
-4. **继续爬取**：告诉 Claude 继续爬取到 2000 条（还需约 236 条）
-5. **合并数据**：爬取完成后合并新旧数据
-6. **优化 Skill**：基于更多数据进一步优化提示词 skill
+**最简方式**：把 `jimeng-scraper/RUNBOOK.md` 给 AI，AI 就知道怎么做。
+
+**手动步骤**：
+1. 检查当前数据：`node -e "console.log(JSON.parse(require('fs').readFileSync('jimeng-all.json','utf-8')).length)"`
+2. 启动 Chrome（4 个端口）
+3. 运行爬取（4 端口并行，每个 --max 500）
+4. 合并数据到 jimeng-all.json
+5. 目标 2000 条，当前 1764 条，还需 236 条
 
 ## 本次会话记录（2026-05-22）
 

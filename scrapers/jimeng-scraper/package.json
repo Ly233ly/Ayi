@@ -1,0 +1,17 @@
+{
+  "name": "jimeng-scraper",
+  "version": "2.0.0",
+  "description": "即梦AI提示词批量爬取工具",
+  "main": "jimeng-scraper.js",
+  "scripts": {
+    "start": "node jimeng-scraper.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "playwright": "^1.60.0"
+  }
+}
